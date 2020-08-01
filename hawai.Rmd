@@ -1,0 +1,88 @@
+---
+title: "Hawai"
+author: "Simon Corbeil"
+date: "31/07/2020"
+output: html_document
+---
+
+## Création de la série temporelle
+Importation du fichier 'hawai.csv' et transformation de la colonne temps en format ymd_hms
+```{r}
+library(tidyverse)
+
+hawai <- read_csv('hawai.csv')
+
+library(lubridate)
+
+hawai$time <- date_decimal(hawai$time, tz = 'UTC')
+
+plot(hawai)
+
+library(forecast)
+library(fpp2)
+
+hawai_ts <- ts(hawai %>% select(-time),
+               start = c(hawai$time[1] %>% year(), 3),
+               frequency = 12)
+
+#visualisation des données
+
+autoplot(hawai_ts) 
+
+ggseasonplot(window(hawai_ts[, 1], 1980 , 2002), polar = TRUE) #intéressant l'augmentation constante du CO2 au fil des années
+
+#Corrélation
+
+gglagplot(hawai_ts, set.lags = 1:12) #Corrélation plus important lorsque qu'on est proche du cycle annuel.
+
+```
+
+##Séparation partie test et partie entrainement
+
+```{r}
+
+hawai_te <- window(hawai_ts, end = c(1989, 12)) #entrainement
+hawai_test <- window(hawai_ts, start = c(1990, 1)) #test
+
+```
+##Modélisation
+
+```{r}
+
+hawai_arima <- hawai_te %>% auto.arima() #pas de transformation logarithmique parce que les données n'iront pas dans le négatif
+hawai_ent <- hawai_arima %>% forecast(h=12*13)
+
+autoplot(hawai_ent) +
+  autolayer(fitted(hawai_ent)) +
+  autolayer(hawai_test, color = rgb(0,0,0, 0.6)) +
+  xlim(1990, 2002)
+  
+autoplot(hawai_ent) +
+  autolayer(hawai_test, color = rgb(0,0,0, 0.6)) +
+  xlim(1990, 2002)
+#À vue d'oeil, le modèle prévisionnel semble assez proche de la courbe des données test. Pour la première année, la courbe modèle est très rapprochée de la courbe test, dans la mesure de ce que l'on peut voir.
+#De 1992 à 1995 environ, le modèle surestime quelque peu les données puisque la courbe test se retrouve sous la courbe modèle, à la limite extérieure de la zone de l'intervalle de confiance de 80%.
+#Par la suite, la courbe test rejoint à nouveau la tendance du modèle pour le reste des années, avec des prévisions assez juste autour de 1998-1999.
+
+accuracy(hawai_ent, hawai_ts)
+#On peut utiliser la fonction accuracy pour évaluer différents indicateurs d'erreur de la prévision. Difficile à commenter la prévision sans autre modèle de comparaison.
+```
+
+
+##Analyse des résidus
+
+```{r}
+hawai_arima %>% checkresiduals()
+```
+Il est difficile de dire à la vue du premier graphique si les résidus sont du bruit blanc, malgré quelques pics visibles. Le graphique ACF, semble montrer qu'il se forme une autocorrélation entre le mois zéro et le mois 4 et 19 (à l'oeil). Ainsi, le modèle n'est probablement pas parfaitement adapté; il  serait à vérifier ou à changé pour un autre modèle qui n'aurait pas d'autocorrélation. Le dernier graphique montre une distribution des résidus globalement normale.
+Le test L-jung box donne un p-value de 0.351, ce qui représente la probabilité que les résidus soient issus d'un bruit blanc. Ici la probabilité est relativement haute, par rapport à d'autre p-value que l'on obtient généralement. Elle montre tout de même une certaine structure des résidus, que l'on retrouve dans le graphique 2 de l'analyse des résidus, puisque la p-value pourrait être plus près de 1.
+```{r}
+library(e1071)
+kurtosis(residuals(hawai_arima), na.rm = TRUE)
+```
+Un test de kurtosis avec une valeur de 1.19 révèle que la distribution des résidus n'est pas tout à fait normale, peut-être un peu trop pointue, avec peu de valeurs extrêmes.
+
+## Commentaires
+Le modèle semble assez fiable, autant à la vue de la courbe que par les différentes analyses. Il n'est néanmoins pas parfait, certains résidus montrent une autocorrélation à deux moments précis.
+D'une part, il serait pertinent de comparer les différents résultats de précision obtenus avec un autre modèle, tel le snaive, pour avoir une meilleure perspective de la prévision obtenue.
+D'autre part, il aurait été possible de varier la proportion de données d'entrainement et de test pour observer la constance du modèle obtenu. 
